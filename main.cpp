@@ -115,23 +115,78 @@ make_tuple(Types &&...values) {
       std::forward<Types>(values)...);
 }
 
+
+template <class TupleLike>
+struct tuple_size;
+
+template<class... Typs>
+struct tuple_size<Tuple<Typs...>> {
+    static constexpr std::size_t value = sizeof...(Typs);
+};
+
+template <class Fn, class TupleLike, std::size_t... Indices>
+auto apply_impl(Fn &&fn, TupleLike &&tupl, IndexSequence<Indices...>)
+    -> decltype(std::forward<Fn>(fn)(get<Indices>(std::forward<TupleLike>(tupl))...))
+    {
+    return std::forward<Fn>(fn)(get<Indices>(tupl)...);
+}
+
+template <class T>
+struct RemoveRef {
+    using type = T;
+};
+
+template <class T>
+struct RemoveRef<T &> {
+    using type = T;
+};
+
+template <class T>
+struct RemoveRef<T &&> {
+    using type = T;
+};
+
+template <class Fn, class TupleLike>
+auto apply(Fn &&fn, TupleLike &&tupl)
+    -> decltype(
+        apply_impl(
+            std::forward<Fn>(fn), // Function
+            std::forward<TupleLike>(tupl), // Tuple
+            MakeIndexSequence<
+                tuple_size<typename RemoveRef<TupleLike>::type>::value
+            >()
+        )
+    ) {
+    return apply_impl(std::forward<Fn>(fn), tupl, MakeIndexSequence<tuple_size<typename RemoveRef<TupleLike>::type>::value>{});
+}
+
 int main(__attribute__((unused)) int argc,
          __attribute__((unused)) char *argv[]) {
 
   std::vector<int> vv{1, 2, 3, 4, 5};
 
+    std::vector<std::string> vs{"Hi"};
+
   auto tt = make_tuple(vv);
-  auto tt2 = make_tuple(std::move(vv));
-  auto tt3 = std::move(tt);
+  // auto tt2 = make_tuple(std::move(vv));
+  // auto tt3 = std::move(tt);
 
-  auto tt4 = tt2;
+    auto tt3 = make_tuple(std::move(vv), std::move(vs));
 
-  (void)tt3;
+
+    apply([](std::vector<int> &x, std::vector<std::string> &s) -> void {
+        for ( auto &i : x ) {
+            std::cout << i << "\n";
+        }
+
+        for ( auto &i : s ) {
+            std::cout << i << "\n";
+        }
+    }, tt3);
+
 
   std::cout << get<0>(tt).size() << "\n";
-  std::cout << get<0>(tt2).size() << "\n";
   std::cout << get<0>(tt3).size() << "\n";
-  std::cout << get<0>(tt4).size() << "\n";
 
   return 0;
 }
