@@ -82,6 +82,21 @@ struct EnableIf<false, Type> { };
 template <class... TypesT>
 struct TypePack {};
 
+template <class T>
+struct RemoveRef {
+    using type = T;
+};
+
+template <class T>
+struct RemoveRef<T &> {
+    using type = T;
+};
+
+template <class T>
+struct RemoveRef<T &&> {
+    using type = T;
+};
+
 
 
 #endif

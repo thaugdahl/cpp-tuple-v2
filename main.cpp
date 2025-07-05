@@ -1,20 +1,22 @@
+// C++11 Compatible Tuple Implementation
+
 #include "type_traits.hpp"
 #include <iostream>
 #include <type_traits>
 #include <vector>
 
-template <std::size_t Index, class Type> struct TupleLeaf {
-  using StoredType = typename std::remove_reference<Type>::type;
-
-  template <class PassedType>
-  TupleLeaf(PassedType &&value_) : value{std::forward<PassedType>(value_)} {}
-  StoredType value;
-};
 
 template <class... Types> struct Tuple;
 
 namespace detail {
 
+/**
+* Conflicting Move Params
+* ----------------------------
+* A metaprogramming utility to identify
+* when a parameter pack will cause conflict when resolving
+* the move constructor.
+*/
 template <class Pack1, class Pack2> struct ConflictingMoveParams;
 
 template <class... Types, class... Params>
@@ -28,55 +30,75 @@ struct ConflictingMoveParams<TypePack<Types...>, TypePack<Params...>> {
 };
 } // namespace detail
 
+//===------------------------------------------------------------===//
+//=== Tuple Implementation
+//===------------------------------------------------------------===//
 template <class Seq, class... Types> struct TupleImpl;
 
+// EBO Class
+template <std::size_t Index, class Type> struct TupleLeaf {
+  using StoredType = typename RemoveRef<Type>::type;
+
+  template <class PassedType>
+  TupleLeaf(PassedType &&value_) : value{std::forward<PassedType>(value_)} {}
+  StoredType value;
+};
+
+//
 template <std::size_t... Indices, class... Types>
 struct TupleImpl<IndexSequence<Indices...>, Types...>
     : TupleLeaf<Indices, Types>... {
 
-  using Self = TupleImpl<IndexSequence<Indices...>, Types...>;
+    using Self = TupleImpl<IndexSequence<Indices...>, Types...>;
 
-  // SFINAE. Disable this constructor if it conflicts with the default move
-  // constructor
-  template <class... Ts,
-            typename EnableIf<!detail::ConflictingMoveParams<
-                                  TypePack<Types...>, TypePack<Ts...>>::value,
-                              int>::type = 0>
-  TupleImpl(Ts &&...values)
-      : TupleLeaf<Indices, Types>{std::forward<Ts>(values)}... {}
 
-  TupleImpl(Self &&other)
-      : TupleLeaf<Indices, Types>(std::move(
-            static_cast<TupleLeaf<Indices, Types> &>(other).value))... {}
+    //------------------------------
+    // Constructors and Assignments
+    //------------------------------
 
-  TupleImpl(const Self &other)
-      : TupleLeaf<Indices, Types>(
-            static_cast<const TupleLeaf<Indices, Types> &>(other).value)... {}
+    // SFINAE. Disable this constructor if it conflicts with the default move
+    // constructor
+    template <class... Ts,
+    typename EnableIf<!detail::ConflictingMoveParams<
+    TypePack<Types...>, TypePack<Ts...>>::value,
+    int>::type = 0>
+    TupleImpl(Ts &&...values)
+    : TupleLeaf<Indices, Types>{std::forward<Ts>(values)}... {}
 
-  template <class TypeT, std::size_t Index> inline void move_impl(Self &other) {
-    static_cast<TupleLeaf<Index, TypeT> &>(*this).value =
-        std::move(static_cast<TupleLeaf<Index, TypeT> &>(other).value);
-  }
+    TupleImpl(Self &&other)
+        : TupleLeaf<Indices, Types>(std::move(
+        static_cast<TupleLeaf<Indices, Types> &>(other).value))... {}
 
-  template <class... TypesP, std::size_t... IndicesP>
-  inline void move(Self &&other, IndexSequence<IndicesP...>) {
-    (void)std::initializer_list<int>{(move_impl<TypesP, Indices>(other), 0)...};
-  }
+    TupleImpl(const Self &other)
+        : TupleLeaf<Indices, Types>(
+        static_cast<const TupleLeaf<Indices, Types> &>(other).value)... {}
 
-  Self &operator=(Self &&other) {
-    using Seq = MakeIndexSequence<sizeof...(Types)>;
-    move<Types...>(std::move(other), Seq{});
-    return *this;
-  }
+
+    // Move assignment. Implemented with "poor-mans pack expansion"
+    template <class TypeT, std::size_t Index> inline void move_impl(Self &other) {
+        static_cast<TupleLeaf<Index, TypeT> &>(*this).value =
+            std::move(static_cast<TupleLeaf<Index, TypeT> &>(other).value);
+    }
+
+    template <class... TypesP, std::size_t... IndicesP>
+    inline void move(Self &&other, IndexSequence<IndicesP...>) {
+        (void)std::initializer_list<int>{(move_impl<TypesP, Indices>(other), 0)...};
+    }
+
+    Self &operator=(Self &&other) {
+        using Seq = MakeIndexSequence<sizeof...(Types)>;
+        move<Types...>(std::move(other), Seq{});
+        return *this;
+    }
 };
 
 template <class... Types>
 struct Tuple : TupleImpl<MakeIndexSequence<sizeof...(Types)>,
-                         typename std::remove_reference<Types>::type...> {
+                         typename RemoveRef<Types>::type...> {
 
   using Self = Tuple<Types...>;
   using Impl = TupleImpl<MakeIndexSequence<sizeof...(Types)>,
-                         typename std::remove_reference<Types>::type...>;
+                         typename RemoveRef<Types>::type...>;
 
   template <class... Ts>
   Tuple(Ts &&...values) : Impl{std::forward<Ts>(values)...} {}
@@ -89,6 +111,10 @@ struct Tuple : TupleImpl<MakeIndexSequence<sizeof...(Types)>,
   Tuple &operator=(Self &&other) = default;
   Tuple &operator=(const Self &other) = default;
 };
+
+//===------------------------------------------------------------===//
+//=== Tuple Getters
+//===------------------------------------------------------------===//
 
 template <std::size_t Index, class... Types>
 typename TypeAt<Index, Types...>::type &get(Tuple<Types...> &tup) {
@@ -109,12 +135,16 @@ const typename TypeAt<Index, Types...>::type &get(const Tuple<Types...> &tup) {
 }
 
 template <class... Types>
-Tuple<typename std::remove_reference<Types>::type...>
+Tuple<typename RemoveRef<Types>::type...>
 make_tuple(Types &&...values) {
-  return Tuple<typename std::remove_reference<Types>::type...>(
+  return Tuple<typename RemoveRef<Types>::type...>(
       std::forward<Types>(values)...);
 }
 
+
+//===------------------------------------------------------------===//
+//=== Tuple Apply
+//===------------------------------------------------------------===//
 
 template <class TupleLike>
 struct tuple_size;
@@ -131,20 +161,6 @@ auto apply_impl(Fn &&fn, TupleLike &&tupl, IndexSequence<Indices...>)
     return std::forward<Fn>(fn)(get<Indices>(tupl)...);
 }
 
-template <class T>
-struct RemoveRef {
-    using type = T;
-};
-
-template <class T>
-struct RemoveRef<T &> {
-    using type = T;
-};
-
-template <class T>
-struct RemoveRef<T &&> {
-    using type = T;
-};
 
 template <class Fn, class TupleLike>
 auto apply(Fn &&fn, TupleLike &&tupl)
@@ -163,14 +179,10 @@ auto apply(Fn &&fn, TupleLike &&tupl)
 int main(__attribute__((unused)) int argc,
          __attribute__((unused)) char *argv[]) {
 
-  std::vector<int> vv{1, 2, 3, 4, 5};
-
+    std::vector<int> vv{1, 2, 3, 4, 5};
     std::vector<std::string> vs{"Hi"};
 
-  auto tt = make_tuple(vv);
-  // auto tt2 = make_tuple(std::move(vv));
-  // auto tt3 = std::move(tt);
-
+    auto tt = make_tuple(vv);
     auto tt3 = make_tuple(std::move(vv), std::move(vs));
 
 
@@ -185,8 +197,8 @@ int main(__attribute__((unused)) int argc,
     }, tt3);
 
 
-  std::cout << get<0>(tt).size() << "\n";
-  std::cout << get<0>(tt3).size() << "\n";
+    std::cout << get<0>(tt).size() << "\n";
+    std::cout << get<0>(tt3).size() << "\n";
 
-  return 0;
+    return 0;
 }
